@@ -64,7 +64,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[30s])) / sum(rate(http_requests_total[30s]))",
+          "expr": "(sum(rate(http_requests_total{status=~\"5..\"}[30s])) or vector(0)) / sum(rate(http_requests_total[30s]))",
           "legendFormat": "5xx ratio",
           "datasource": {
             "type": "prometheus",

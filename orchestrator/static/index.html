@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incident Response Simulator</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #2a313c; --text: #e6edf3; --muted: #8b949e;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --idle: #484f58; --info: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line); display: flex;
+           justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+  h1 { font-size: 18px; margin: 0; }
+  h1 small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 2px; }
+  .links a { color: var(--info); text-decoration: none; margin-left: 14px; font-size: 13px; }
+  .links a:hover { text-decoration: underline; }
+  main { padding: 20px 24px; display: grid; gap: 16px; max-width: 1280px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+  /* pipeline */
+  .pipeline { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding-bottom: 4px; }
+  .stage { flex: 1 0 140px; border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+           background: #0f141b; position: relative; transition: border-color .3s, box-shadow .3s; }
+  .stage + .stage { margin-left: 26px; }
+  .stage + .stage::before { content: "\2192"; position: absolute; left: -22px; top: 50%;
+           transform: translateY(-50%); color: var(--muted); font-size: 18px; }
+  .stage .n { font-size: 11px; color: var(--muted); }
+  .stage .t { font-weight: 600; margin: 2px 0 6px; }
+  .stage .s { font-size: 12px; color: var(--muted); min-height: 32px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--idle); margin-right: 6px; }
+  .stage.ok { border-color: var(--ok); } .stage.ok .dot { background: var(--ok); }
+  .stage.warn { border-color: var(--warn); } .stage.warn .dot { background: var(--warn); }
+  .stage.bad { border-color: var(--bad); box-shadow: 0 0 14px rgba(248,81,73,.25); } .stage.bad .dot { background: var(--bad); }
+  .stage.run { border-color: var(--info); } .stage.run .dot { background: var(--info); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .kpi { background: #0f141b; border-radius: 8px; padding: 10px; }
+  .kpi .v { font-size: 22px; font-weight: 600; }
+  .kpi .l { font-size: 11px; color: var(--muted); }
+  svg.spark { width: 100%; height: 70px; background: #0f141b; border-radius: 8px; }
+
+  /* controls */
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .row label { width: 110px; color: var(--muted); font-size: 13px; }
+  input[type=range] { flex: 1; min-width: 120px; }
+  .val { width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+  button { background: #21262d; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+           padding: 7px 12px; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.danger { background: #b62324; border-color: #b62324; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; }
+  button.good { background: #238636; border-color: #238636; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .bigbtn { width: 100%; padding: 12px; font-size: 14px; font-weight: 600; }
+
+  /* lists */
+  ul { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+  li { padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; display: flex; gap: 8px; }
+  li:last-child { border: 0; }
+  li .ts { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  li a { color: var(--info); }
+  .tag { flex: none; font-size: 10px; padding: 1px 6px; border-radius: 10px; height: 16px; margin-top: 2px;
+         text-transform: uppercase; background: var(--idle); color: #fff; }
+  .tag.alert, .tag.error { background: var(--bad); } .tag.jira { background: #0052cc; }
+  .tag.redeploy { background: #8957e5; } .tag.chaos { background: var(--warn); }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--idle); color: #fff; }
+  .badge.firing { background: var(--bad); } .badge.pending { background: var(--warn); }
+  .badge.success { background: var(--ok); } .badge.failure { background: var(--bad); }
+  .badge.in_progress, .badge.queued { background: var(--info); }
+  .muted { color: var(--muted); }
+  #toast { position: fixed; bottom: 18px; right: 18px; background: #21262d; border: 1px solid var(--line);
+           padding: 10px 14px; border-radius: 8px; display: none; max-width: 340px; }
+  @media (max-width: 700px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Incident Response Simulator
+    <small>fault &rarr; detection &rarr; alert &rarr; ticket &rarr; self-healing &rarr; recovery</small></h1>
+  <div class="links">
+    <a href="http://localhost:3000" target="_blank">Grafana</a>
+    <a href="http://localhost:9090/alerts" target="_blank">Prometheus</a>
+    <a href="http://localhost:9093" target="_blank">Alertmanager</a>
+    <a id="jiraLink" href="#" target="_blank">Jira</a>
+    <a id="ghLink" href="#" target="_blank">GitHub Actions</a>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Live pipeline</h2>
+    <div class="pipeline" id="pipeline"></div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Service health (chaos-app)</h2>
+      <div class="kpis">
+        <div class="kpi"><div class="v" id="kRate">–</div><div class="l">requests / s</div></div>
+        <div class="kpi"><div class="v" id="kErr">–</div><div class="l">error ratio</div></div>
+        <div class="kpi"><div class="v" id="kP95">–</div><div class="l">p95 latency</div></div>
+        <div class="kpi"><div class="v" id="kUp">–</div><div class="l">target</div></div>
+      </div>
+      <svg class="spark" id="spark" viewBox="0 0 300 70" preserveAspectRatio="none"></svg>
+      <div class="muted" style="font-size:11px;margin-top:4px">Error ratio, last ~2 minutes (dashed line = 30% alert threshold)</div>
+    </section>
+
+    <section class="card">
+      <h2>Chaos controls</h2>
+      <div class="row"><label>Failure rate</label>
+        <input type="range" id="failR" min="0" max="100" value="80"><span class="val" id="failV">80%</span>
+        <button class="danger" onclick="injectFail()">Inject</button></div>
+      <div class="row"><label>Added latency</label>
+        <input type="range" id="latR" min="0" max="50" value="20"><span class="val" id="latV">2.0s</span>
+        <button class="danger" onclick="injectLat()">Inject</button></div>
+      <div class="row"><button onclick="act('/api/chaos/reset')">Reset chaos manually</button>
+        <span class="muted" id="chaosNow"></span></div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+      <button class="primary bigbtn" id="redeployBtn" onclick="redeploy()">
+        &#9654; Manually trigger redeploy workflow</button>
+      <div class="muted" style="font-size:12px;margin-top:6px">
+        Sends the same GitHub <code>repository_dispatch</code> the alert system uses; your self-hosted runner recreates the container.</div>
+    </section>
+  </div>
+
+  <div class="grid">
+    <section class="card"><h2>Active alerts (Prometheus)</h2><ul id="alerts"></ul></section>
+    <section class="card"><h2>GitHub Actions runs</h2><ul id="runs"></ul></section>
+  </div>
+
+  <section class="card"><h2>Incident timeline</h2><ul id="events"></ul></section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const hist = [];                       // error-ratio history
+const MAX = 60;
+let last = null;
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", 3500);
+}
+async function act(url, body) {
+  try {
+    const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"},
+                                body: JSON.stringify(body || {})});
+    toast(r.ok ? "Done" : "Request failed (" + r.status + ")");
+  } catch (e) { toast("Error: " + e.message); }
+  poll();
+}
+const injectFail = () => act("/api/chaos/fail-rate", {value: $("failR").value / 100});
+const injectLat = () => act("/api/chaos/latency", {value: $("latR").value / 10, rate: 1});
+async function redeploy() {
+  const b = $("redeployBtn"); b.disabled = true;
+  await act("/api/redeploy");
+  setTimeout(() => b.disabled = false, 3000);
+}
+$("failR").oninput = e => $("failV").textContent = e.target.value + "%";
+$("latR").oninput = e => $("latV").textContent = (e.target.value / 10).toFixed(1) + "s";
+
+const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString();
+const pct = v => v == null ? "–" : (v * 100).toFixed(1) + "%";
+
+function stageStates(s) {
+  const c = s.chaos || {}, m = s.metrics, alerts = s.alerts || [];
+  const faulty = (c.fail_rate > 0 || c.slow_rate > 0);
+  const firing = alerts.filter(a => a.state === "firing");
+  const pending = alerts.filter(a => a.state === "pending");
+  const recent = k => (s.events || []).find(e => e.kind === k && s.now - e.ts < 300);
+  const run = (s.runs || [])[0];
+  const runLive = run && run.status !== "completed";
+  const healthy = m.error_ratio != null && m.error_ratio < 0.05 && !alerts.length && m.up === 1;
+  const recovered = healthy && (s.events || []).some(e => e.kind === "redeploy" && s.now - e.ts < 600);
+
+  return [
+    {t: "Chaos app", s: s.chaos ? (faulty ? "Faulty: " + describeChaos(c) : "Healthy") : "Unreachable",
+     c: !s.chaos ? "bad" : faulty ? "warn" : "ok"},
+    {t: "Prometheus", s: firing.length ? "Alert FIRING: " + firing.map(a => a.name).join(", ")
+       : pending.length ? "Pending: " + pending.map(a => a.name).join(", ") : "Scraping, no alerts",
+     c: firing.length ? "bad" : pending.length ? "warn" : "ok"},
+    {t: "Alertmanager", s: recent("alert") ? "Delivered alert to orchestrator" : "No recent alerts",
+     c: recent("alert") ? "bad" : "idle"},
+    {t: "Jira ticket", s: recent("jira") ? recent("jira").message : (s.config.jira ? "No recent ticket" : "Not configured"),
+     c: recent("jira") ? "ok" : "idle"},
+    {t: "GitHub Actions", s: run ? run.name + ": " + (runLive ? run.status : run.conclusion) : "No runs yet",
+     c: runLive ? "run" : (run && run.conclusion === "failure") ? "bad" : (run && recent("redeploy")) ? "ok" : "idle"},
+    {t: "Recovery", s: recovered ? "Service healed" : healthy ? "Service healthy" : "Waiting",
+     c: recovered ? "ok" : healthy ? "ok" : "idle"},
+  ];
+}
+function describeChaos(c) {
+  const p = [];
+  if (c.fail_rate > 0) p.push(Math.round(c.fail_rate * 100) + "% errors");
+  if (c.slow_rate > 0) p.push(c.slow_seconds + "s latency");
+  return p.join(", ");
+}
+
+function render(s) {
+  last = s;
+  const st = stageStates(s);
+  $("pipeline").innerHTML = st.map((x, i) =>
+    `<div class="stage ${x.c}"><div class="n">STEP ${i + 1}</div>
+     <div class="t"><span class="dot"></span>${x.t}</div><div class="s">${x.s}</div></div>`).join("");
+
+  const m = s.metrics;
+  $("kRate").textContent = m.req_rate == null ? "–" : m.req_rate.toFixed(1);
+  $("kErr").textContent = pct(m.error_ratio);
+  $("kErr").style.color = m.error_ratio > 0.3 ? "var(--bad)" : "";
+  $("kP95").textContent = m.p95 == null ? "–" : (m.p95 * 1000).toFixed(0) + " ms";
+  $("kUp").textContent = m.up === 1 ? "UP" : m.up === 0 ? "DOWN" : "–";
+  $("kUp").style.color = m.up === 1 ? "var(--ok)" : "var(--bad)";
+  $("chaosNow").textContent = s.chaos ? "now: " + (describeChaos(s.chaos) || "no chaos") : "";
+
+  hist.push(m.error_ratio == null ? 0 : m.error_ratio);
+  if (hist.length > MAX) hist.shift();
+  drawSpark();
+
+  $("alerts").innerHTML = s.alerts.length ? s.alerts.map(a =>
+    `<li><span class="badge ${a.state}">${a.state}</span><b>${a.name}</b><span class="muted">${a.severity || ""}</span></li>`).join("")
+    : `<li class="muted">No active alerts</li>`;
+
+  $("runs").innerHTML = s.runs.length ? s.runs.map(r =>
+    `<li><span class="badge ${r.conclusion || r.status}">${r.conclusion || r.status}</span>
+     <a href="${r.url}" target="_blank">${r.name}</a><span class="muted">${r.event}</span></li>`).join("")
+    : `<li class="muted">${s.config.github ? "No runs yet" : "GitHub token not configured"}</li>`;
+
+  $("events").innerHTML = s.events.length ? s.events.map(e =>
+    `<li><span class="ts">${fmtTime(e.ts)}</span><span class="tag ${e.kind}">${e.kind}</span>
+     <span>${e.link ? `<a href="${e.link}" target="_blank">${e.message}</a>` : e.message}</span></li>`).join("")
+    : `<li class="muted">No events yet. Inject a failure to start the demo.</li>`;
+
+  if (s.config.jira_board) $("jiraLink").href = s.config.jira_board + "/jira/software/projects";
+  if (s.config.repo) $("ghLink").href = "https://github.com/" + s.config.repo + "/actions";
+}
+
+function drawSpark() {
+  const w = 300, h = 70, max = Math.max(0.5, ...hist);
+  const pts = hist.map((v, i) => `${(i / (MAX - 1)) * w},${h - (v / max) * (h - 6) - 3}`).join(" ");
+  const ty = h - (0.3 / max) * (h - 6) - 3;
+  $("spark").innerHTML =
+    `<line x1="0" x2="${w}" y1="${ty}" y2="${ty}" stroke="#f85149" stroke-dasharray="4 4" stroke-width=".8"/>
+     <polyline points="${pts}" fill="none" stroke="#58a6ff" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+}
+
+async function poll() {
+  try { render(await (await fetch("/api/status")).json()); }
+  catch (e) { /* orchestrator restarting */ }
+}
+poll(); setInterval(poll, 2000);
+</script>
+</body>
+</html>

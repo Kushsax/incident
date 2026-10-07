@@ -63,3 +63,36 @@ def test_resolved_alert_is_ignored(monkeypatch):
         "/alert", json={"alerts": [resolved]}, headers={"Authorization": "Bearer secret"}
     )
     assert r.get_json()["firing"] == 0
+
+
+def test_ui_served():
+    r = main.app.test_client().get("/")
+    assert r.status_code == 200
+    assert b"Incident Response Simulator" in r.data
+
+
+def test_manual_redeploy_bypasses_cooldown_and_logs_event(monkeypatch):
+    monkeypatch.setattr(github_dispatch, "trigger_redeploy", lambda reason="": True)
+    main._last_redeploy[0] = 9e12  # cooldown would block an alert-driven redeploy
+    c = main.app.test_client()
+    assert c.post("/api/redeploy").get_json() == {"triggered": True}
+    assert any(e["kind"] == "redeploy" for e in main._events)
+
+
+def test_manual_redeploy_failure_returns_502(monkeypatch):
+    monkeypatch.setattr(github_dispatch, "trigger_redeploy", lambda reason="": False)
+    assert main.app.test_client().post("/api/redeploy").status_code == 502
+
+
+def test_status_survives_unreachable_backends(monkeypatch):
+    monkeypatch.setattr(main, "CHAOS_URL", "http://127.0.0.1:1")
+    monkeypatch.setattr(main, "PROM_URL", "http://127.0.0.1:1")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    body = main.app.test_client().get("/api/status").get_json()
+    assert body["chaos"] is None
+    assert body["alerts"] == []
+    assert body["metrics"]["error_ratio"] is None
+
+
+def test_chaos_proxy_rejects_unknown_action():
+    assert main.app.test_client().post("/api/chaos/explode").status_code == 404
