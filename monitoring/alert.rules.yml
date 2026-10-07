@@ -1,0 +1,33 @@
+groups:
+  - name: chaos-app
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[30s]))
+            / sum(rate(http_requests_total[30s])) > 0.3
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "chaos-app error rate above 30%"
+          description: "More than 30% of requests returned 5xx for 30 seconds."
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket[30s])) by (le)) > 1
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "chaos-app p95 latency above 1s"
+          description: "95th percentile latency has exceeded 1 second for 30 seconds."
+
+      - alert: ServiceDown
+        expr: up{job="chaos-app"} == 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "chaos-app is unreachable"
+          description: "Prometheus cannot scrape chaos-app."

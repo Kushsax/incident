@@ -1,0 +1,21 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: flake8 app orchestrator
+      - name: Test chaos app
+        run: cd app && python -m pytest -q
+      - name: Test orchestrator
+        run: cd orchestrator && python -m pytest -q
+      - name: Build images
+        run: |
+          docker build -t chaos-app ./app
+          docker build -t orchestrator ./orchestrator

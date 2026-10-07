@@ -1,0 +1,22 @@
+name: Redeploy chaos-app
+on:
+  repository_dispatch:
+    types: [redeploy]
+  workflow_dispatch:
+
+jobs:
+  redeploy:
+    runs-on: self-hosted   # your laptop, which can reach the local Docker Engine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show trigger reason
+        run: echo "Triggered by alert(s) ${{ github.event.client_payload.reason }}"
+      - name: Recreate chaos-app
+        run: docker compose -p incident-sim up -d --build --force-recreate --no-deps chaos-app
+      - name: Health check
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fs http://localhost:8000/healthz; then echo " healthy"; exit 0; fi
+            sleep 2
+          done
+          echo "chaos-app did not become healthy"; exit 1

@@ -1,0 +1,4 @@
+-r app/requirements.txt
+-r orchestrator/requirements.txt
+pytest==8.2.2
+flake8==7.1.0

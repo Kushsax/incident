@@ -1,0 +1,17 @@
+# __WEBHOOK_TOKEN__ is substituted at container start (see docker-compose.yml).
+route:
+  receiver: orchestrator
+  group_by: ["alertname"]
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 1h
+
+receivers:
+  - name: orchestrator
+    webhook_configs:
+      - url: http://orchestrator:9000/alert
+        send_resolved: false
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: "__WEBHOOK_TOKEN__"

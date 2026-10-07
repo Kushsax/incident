@@ -1,0 +1,60 @@
+name: incident-sim
+
+services:
+  chaos-app:
+    build: ./app
+    container_name: chaos-app
+    environment:
+      FAIL_RATE: "0"
+      SLOW_RATE: "0"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  loadgen:
+    image: curlimages/curl:8.8.0
+    depends_on: [chaos-app]
+    entrypoint: ["/bin/sh", "-c", "while true; do curl -s -o /dev/null --max-time 5 http://chaos-app:8000/work; sleep 0.2; done"]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on: [chaos-app]
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    environment:
+      WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:-change-me-to-a-random-string}
+    volumes:
+      - ./monitoring/alertmanager.yml.tmpl:/etc/alertmanager/alertmanager.yml.tmpl:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - sed "s|__WEBHOOK_TOKEN__|$$WEBHOOK_TOKEN|" /etc/alertmanager/alertmanager.yml.tmpl > /tmp/alertmanager.yml && exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
+    ports:
+      - "9093:9093"
+
+  orchestrator:
+    build: ./orchestrator
+    env_file: .env
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus]
