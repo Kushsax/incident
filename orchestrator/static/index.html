@@ -88,7 +88,7 @@
     <a href="http://localhost:3000" target="_blank">Grafana</a>
     <a href="http://localhost:9090/alerts" target="_blank">Prometheus</a>
     <a href="http://localhost:9093" target="_blank">Alertmanager</a>
-    <a id="jiraLink" href="#" target="_blank">Jira</a>
+    <a id="jiraLink" href="#" target="_blank">Jira tickets</a>
     <a id="ghLink" href="#" target="_blank">GitHub Actions</a>
   </div>
 </header>
@@ -123,14 +123,18 @@
       <div class="row"><button onclick="act('/api/chaos/reset')">Reset chaos manually</button>
         <span class="muted" id="chaosNow"></span></div>
       <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
-      <button class="primary bigbtn" id="redeployBtn" onclick="redeploy()">
-        &#9654; Manually trigger redeploy workflow</button>
-      <div class="muted" style="font-size:12px;margin-top:6px">
-        Sends the same GitHub <code>repository_dispatch</code> the alert system uses; your self-hosted runner recreates the container.</div>
+      <button class="danger bigbtn" id="incidentBtn" onclick="incident()">
+        &#9888; Simulate incident (break the app)</button>
+      <div class="muted" style="font-size:12px;margin:6px 0 12px">
+        Makes chaos-app fail for real. Then watch the pipeline do it all: Prometheus alert &rarr; Alertmanager &rarr;
+        Jira ticket &rarr; GitHub Actions redeploy &rarr; recovery (about 1&ndash;2 minutes).</div>
+      <button class="bigbtn" id="redeployBtn" onclick="redeploy()">
+        &#9654; Force redeploy only (skips alert and Jira)</button>
     </section>
   </div>
 
   <div class="grid">
+    <section class="card"><h2>Jira tickets raised automatically</h2><ul id="tickets"></ul></section>
     <section class="card"><h2>Active alerts (Prometheus)</h2><ul id="alerts"></ul></section>
     <section class="card"><h2>GitHub Actions runs</h2><ul id="runs"></ul></section>
   </div>
@@ -159,6 +163,11 @@ async function act(url, body) {
 }
 const injectFail = () => act("/api/chaos/fail-rate", {value: $("failR").value / 100});
 const injectLat = () => act("/api/chaos/latency", {value: $("latR").value / 10, rate: 1});
+async function incident() {
+  const b = $("incidentBtn"); b.disabled = true;
+  await act("/api/incident", {value: 0.8});
+  setTimeout(() => b.disabled = false, 3000);
+}
 async function redeploy() {
   const b = $("redeployBtn"); b.disabled = true;
   await act("/api/redeploy");
@@ -171,31 +180,31 @@ const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString();
 const pct = v => v == null ? "–" : (v * 100).toFixed(1) + "%";
 
 function stageStates(s) {
-  const c = s.chaos || {}, m = s.metrics, alerts = s.alerts || [];
-  const faulty = (c.fail_rate > 0 || c.slow_rate > 0);
-  const firing = alerts.filter(a => a.state === "firing");
-  const pending = alerts.filter(a => a.state === "pending");
-  const recent = k => (s.events || []).find(e => e.kind === k && s.now - e.ts < 300);
-  const run = (s.runs || [])[0];
+  const i = s.incident, c = s.chaos || {};
+  const t = x => x ? fmtTime(x) : "";
+  const manual = i && i.kind === "manual";
+  const run = i && i.run;
   const runLive = run && run.status !== "completed";
-  const healthy = m.error_ratio != null && m.error_ratio < 0.05 && !alerts.length && m.up === 1;
-  const recovered = healthy && (s.events || []).some(e => e.kind === "redeploy" && s.now - e.ts < 600);
-
-  return [
-    {t: "Chaos app", s: s.chaos ? (faulty ? "Faulty: " + describeChaos(c) : "Healthy") : "Unreachable",
-     c: !s.chaos ? "bad" : faulty ? "warn" : "ok"},
-    {t: "Prometheus", s: firing.length ? "Alert FIRING: " + firing.map(a => a.name).join(", ")
-       : pending.length ? "Pending: " + pending.map(a => a.name).join(", ") : "Scraping, no alerts",
-     c: firing.length ? "bad" : pending.length ? "warn" : "ok"},
-    {t: "Alertmanager", s: recent("alert") ? "Delivered alert to orchestrator" : "No recent alerts",
-     c: recent("alert") ? "bad" : "idle"},
-    {t: "Jira ticket", s: recent("jira") ? recent("jira").message : (s.config.jira ? "No recent ticket" : "Not configured"),
-     c: recent("jira") ? "ok" : "idle"},
-    {t: "GitHub Actions", s: run ? run.name + ": " + (runLive ? run.status : run.conclusion) : "No runs yet",
-     c: runLive ? "run" : (run && run.conclusion === "failure") ? "bad" : (run && recent("redeploy")) ? "ok" : "idle"},
-    {t: "Recovery", s: recovered ? "Service healed" : healthy ? "Service healthy" : "Waiting",
-     c: recovered ? "ok" : healthy ? "ok" : "idle"},
+  const faulty = c.fail_rate > 0 || c.slow_rate > 0;
+  const firing = (s.alerts || []).find(a => a.state === "firing");
+  // [title, detail, state] ; state: done | active | wait | skip
+  const st = (done, active) => done ? "ok" : active ? "run" : "idle";
+  const steps = [
+    {t: "1. App breaks", s: i && i.fault ? "Failures injected " + t(i.fault) : faulty ? "Faulty: " + describeChaos(c) : "Healthy",
+     c: i && i.fault ? "ok" : faulty ? "warn" : "idle"},
+    {t: "2. Prometheus detects", s: manual ? "skipped (manual)" : i && i.detected ? "Alert " + (firing ? "FIRING " : "pending ") + t(i.detected)
+       : i ? "Waiting for 30s threshold" : "Watching", c: manual ? "idle" : st(i && i.detected && (firing || i.alert), i && i.fault)},
+    {t: "3. Alertmanager notifies", s: manual ? "skipped (manual)" : i && i.alert ? "Orchestrator notified " + t(i.alert) : "Waiting",
+     c: manual ? "idle" : st(i && i.alert, i && i.detected)},
+    {t: "4. GitHub Actions redeploys", s: run ? (runLive ? "Running on your laptop..." : "Run " + run.conclusion) + " " + t(i.redeploy)
+       : i && i.redeploy ? "Dispatched " + t(i.redeploy) + ", waiting for runner" : "Waiting",
+     c: run && run.conclusion === "failure" ? "bad" : run && !runLive ? "ok" : i && i.redeploy ? "run" : "idle"},
+    {t: "5. Jira ticket raised", s: manual ? "skipped (manual)" : i && i.jira_key ? i.jira_key + " " + t(i.jira) : i && i.alert ? "Creating..." : "Waiting",
+     c: manual ? "idle" : st(i && i.jira_key, i && i.alert), link: i && i.jira_link},
+    {t: "6. Service recovered", s: i && i.recovered ? "Healthy again " + t(i.recovered) : i && i.redeploy ? "Verifying..." : "Waiting",
+     c: st(i && i.recovered, i && i.redeploy)},
   ];
+  return steps;
 }
 function describeChaos(c) {
   const p = [];
@@ -208,8 +217,8 @@ function render(s) {
   last = s;
   const st = stageStates(s);
   $("pipeline").innerHTML = st.map((x, i) =>
-    `<div class="stage ${x.c}"><div class="n">STEP ${i + 1}</div>
-     <div class="t"><span class="dot"></span>${x.t}</div><div class="s">${x.s}</div></div>`).join("");
+    `<div class="stage ${x.c}"><div class="t"><span class="dot"></span>${x.t}</div>
+     <div class="s">${x.link ? `<a href="${x.link}" target="_blank" style="color:var(--info)">${x.s}</a>` : x.s}</div></div>`).join("");
 
   const m = s.metrics;
   $("kRate").textContent = m.req_rate == null ? "–" : m.req_rate.toFixed(1);
@@ -228,6 +237,11 @@ function render(s) {
     `<li><span class="badge ${a.state}">${a.state}</span><b>${a.name}</b><span class="muted">${a.severity || ""}</span></li>`).join("")
     : `<li class="muted">No active alerts</li>`;
 
+  $("tickets").innerHTML = s.tickets.length ? s.tickets.map(k =>
+    `<li><span class="badge">${k.status}</span><a href="${k.url}" target="_blank"><b>${k.key}</b> ${k.summary}</a>
+     <span class="muted">${fmtTime(k.created)}</span></li>`).join("")
+    : `<li class="muted">${s.config.jira ? "No tickets yet" : "Jira not configured"}</li>`;
+
   $("runs").innerHTML = s.runs.length ? s.runs.map(r =>
     `<li><span class="badge ${r.conclusion || r.status}">${r.conclusion || r.status}</span>
      <a href="${r.url}" target="_blank">${r.name}</a><span class="muted">${r.event}</span></li>`).join("")
@@ -238,7 +252,7 @@ function render(s) {
      <span>${e.link ? `<a href="${e.link}" target="_blank">${e.message}</a>` : e.message}</span></li>`).join("")
     : `<li class="muted">No events yet. Inject a failure to start the demo.</li>`;
 
-  if (s.config.jira_board) $("jiraLink").href = s.config.jira_board + "/jira/software/projects";
+  if (s.config.jira_board) $("jiraLink").href = s.config.jira_board + "/issues/?jql=" + encodeURIComponent("project = " + s.config.jira_project + " ORDER BY created DESC");
   if (s.config.repo) $("ghLink").href = "https://github.com/" + s.config.repo + "/actions";
 }
 

@@ -96,3 +96,23 @@ def test_status_survives_unreachable_backends(monkeypatch):
 
 def test_chaos_proxy_rejects_unknown_action():
     assert main.app.test_client().post("/api/chaos/explode").status_code == 404
+
+
+def test_incident_resets_guards_and_breaks_app(monkeypatch):
+    calls = []
+
+    class R:
+        def json(self):
+            return {"fail_rate": 0.8}
+
+    def fake_post(url, json=None, timeout=0):
+        calls.append((url, json))
+        return R()
+
+    monkeypatch.setattr(main.requests, "post", fake_post)
+    main._seen["x"] = 1
+    main._last_redeploy[0] = 9e12
+    r = main.app.test_client().post("/api/incident")
+    assert r.status_code == 200
+    assert calls[0][0].endswith("/chaos/fail-rate") and calls[0][1] == {"value": 0.8}
+    assert main._seen == {} and main._last_redeploy[0] == 0.0
