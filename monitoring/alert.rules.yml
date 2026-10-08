@@ -9,8 +9,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "chaos-app error rate above 30%"
-          description: "More than 30% of requests returned 5xx for 30 seconds."
+          summary: "chaos-app error rate at {{ $value | humanizePercentage }}"
+          description: "{{ $value | humanizePercentage }} of requests returned 5xx over the last 30s (alert threshold: 30%, sustained for 30s)."
 
       - alert: HighLatency
         expr: |
@@ -20,8 +20,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "chaos-app p95 latency above 1s"
-          description: "95th percentile latency has exceeded 1 second for 30 seconds."
+          summary: "chaos-app p95 latency at {{ $value | humanizeDuration }}"
+          description: "95th percentile latency is {{ $value | humanizeDuration }} (alert threshold: 1s, sustained for 30s)."
 
       - alert: ServiceDown
         expr: up{job="chaos-app"} == 0
