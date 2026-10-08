@@ -1,9 +1,9 @@
 # Incident-Response Simulator
 
-Closed loop: **fault → Prometheus detects → Alertmanager alerts → orchestrator opens a Jira ticket and triggers a GitHub Actions redeploy → self-hosted runner recreates the container → Grafana shows recovery.**
+Closed loop: **fault → Prometheus detects → orchestrator sees the firing alert → opens a Jira ticket and triggers a GitHub Actions redeploy → self-hosted runner recreates the container → Grafana shows recovery.**
 
 ```
-chaos-app ──metrics──► Prometheus ──alert──► Alertmanager ──webhook──► orchestrator
+chaos-app ──metrics──► Prometheus ◄──polls firing alerts── orchestrator
     ▲                      │                                              │      │
  loadgen                Grafana                                     Jira API   GitHub repository_dispatch
                                                                                   │
@@ -16,7 +16,6 @@ chaos-app ──metrics──► Prometheus ──alert──► Alertmanager �
 | http://localhost:8001 | chaos-app (`/work`, `/metrics`, `/chaos/*`) |
 | http://localhost:3000 | Grafana (dashboard "Chaos App"; admin / admin) |
 | http://localhost:9090 | Prometheus (Alerts tab) |
-| http://localhost:9093 | Alertmanager |
 | **http://localhost:9000** | **Control panel UI** (live pipeline, chaos buttons, manual redeploy, timeline) |
 
 ## Setup
@@ -38,7 +37,7 @@ Open http://localhost:9000. It shows the six pipeline stages lighting up live, h
 | Faulty app, chaos controls, metrics | `app/` |
 | Alert receiver, Jira + GitHub calls, UI backend | `orchestrator/main.py`, `jira_client.py`, `github_dispatch.py` |
 | Control panel page | `orchestrator/static/index.html` |
-| Prometheus, alert rules, Alertmanager, Grafana | `monitoring/` |
+| Prometheus, alert rules, Grafana | `monitoring/` |
 | Whole stack | `docker-compose.yml` |
 | CI and self-healing workflows | `.github/workflows/ci.yml`, `redeploy.yml` |
 | Secrets (never committed) | `.env` |
@@ -50,7 +49,7 @@ Open http://localhost:9000. It shows the six pipeline stages lighting up live, h
 # 2. inject failures
 curl -X POST localhost:8001/chaos/fail-rate -H 'Content-Type: application/json' -d '{"value":0.8}'
 # 3. watch: Grafana error ratio rises -> Prometheus Alerts: HighErrorRate pending -> firing (~30s)
-#    -> Alertmanager shows it -> docker compose logs -f orchestrator
+#    -> orchestrator polls it (every 5s) -> docker compose logs -f orchestrator
 #    -> new ticket in Jira -> GitHub Actions tab: "Redeploy chaos-app" runs
 #    -> container recreated, chaos resets, Grafana recovers
 # Latency variant:

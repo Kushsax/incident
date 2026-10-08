@@ -26,19 +26,6 @@ services:
       - "9090:9090"
     depends_on: [chaos-app]
 
-  alertmanager:
-    image: prom/alertmanager:v0.27.0
-    environment:
-      WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:-change-me-to-a-random-string}
-    volumes:
-      - ./monitoring/alertmanager.yml.tmpl:/etc/alertmanager/alertmanager.yml.tmpl:ro
-    entrypoint:
-      - /bin/sh
-      - -c
-      - sed "s|__WEBHOOK_TOKEN__|$$WEBHOOK_TOKEN|" /etc/alertmanager/alertmanager.yml.tmpl > /tmp/alertmanager.yml && exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
-    ports:
-      - "9093:9093"
-
   orchestrator:
     build: ./orchestrator
     env_file: .env

@@ -116,3 +116,27 @@ def test_incident_resets_guards_and_breaks_app(monkeypatch):
     assert r.status_code == 200
     assert calls[0][0].endswith("/chaos/fail-rate") and calls[0][1] == {"value": 0.8}
     assert main._seen == {} and main._last_redeploy[0] == 0.0
+
+
+def test_poller_handles_each_firing_alert_once(monkeypatch):
+    main._handled.clear()
+    prom_alert = {"state": "firing", "labels": {"alertname": "HighErrorRate"},
+                  "annotations": {"summary": "error rate at 80%"}, "activeAt": "2026-01-01T00:00:00Z"}
+    pending = dict(prom_alert, state="pending")
+    payload = {"data": {"alerts": [prom_alert, {**pending, "labels": {"alertname": "Other"}}]}}
+
+    class Resp:
+        def json(self):
+            return payload
+
+    monkeypatch.setattr(main.requests, "get", lambda *a, **k: Resp())
+    handled = []
+    monkeypatch.setattr(main, "_process_firing", lambda alerts: handled.append(alerts))
+    main._poll_alerts_once()
+    main._poll_alerts_once()          # still firing: not handled again
+    assert len(handled) == 1 and handled[0][0]["labels"]["alertname"] == "HighErrorRate"
+    payload["data"]["alerts"] = []    # resolved: re-armed
+    main._poll_alerts_once()
+    payload["data"]["alerts"] = [prom_alert]
+    main._poll_alerts_once()
+    assert len(handled) == 2

@@ -87,7 +87,6 @@
   <div class="links">
     <a href="http://localhost:3000" target="_blank">Grafana</a>
     <a href="http://localhost:9090/alerts" target="_blank">Prometheus</a>
-    <a href="http://localhost:9093" target="_blank">Alertmanager</a>
     <a id="jiraLink" href="#" target="_blank">Jira tickets</a>
     <a id="ghLink" href="#" target="_blank">GitHub Actions</a>
   </div>
@@ -126,7 +125,7 @@
       <button class="danger bigbtn" id="incidentBtn" onclick="incident()">
         &#9888; Simulate incident (break the app)</button>
       <div class="muted" style="font-size:12px;margin:6px 0 12px">
-        Makes chaos-app fail for real. Then watch the pipeline do it all: Prometheus alert &rarr; Alertmanager &rarr;
+        Makes chaos-app fail for real. Then watch the pipeline do it all: Prometheus alert &rarr; orchestrator &rarr;
         Jira ticket &rarr; GitHub Actions redeploy &rarr; recovery (about 1&ndash;2 minutes).</div>
       <button class="bigbtn" id="redeployBtn" onclick="redeploy()">
         &#9654; Force redeploy only (skips alert and Jira)</button>
@@ -194,7 +193,7 @@ function stageStates(s) {
      c: i && i.fault ? "ok" : faulty ? "warn" : "idle"},
     {t: "2. Prometheus detects", s: manual ? "skipped (manual)" : i && i.detected ? "Alert " + (firing ? "FIRING " : "pending ") + t(i.detected)
        : i ? "Waiting for 30s threshold" : "Watching", c: manual ? "idle" : st(i && i.detected && (firing || i.alert), i && i.fault)},
-    {t: "3. Alertmanager notifies", s: manual ? "skipped (manual)" : i && i.alert ? "Orchestrator notified " + t(i.alert) : "Waiting",
+    {t: "3. Orchestrator notified", s: manual ? "skipped (manual)" : i && i.alert ? "Orchestrator notified " + t(i.alert) : "Waiting",
      c: manual ? "idle" : st(i && i.alert, i && i.detected)},
     {t: "4. GitHub Actions redeploys", s: run ? (runLive ? "Running on your laptop..." : "Run " + run.conclusion) + " " + t(i.redeploy)
        : i && i.redeploy ? "Dispatched " + t(i.redeploy) + ", waiting for runner" : "Waiting",

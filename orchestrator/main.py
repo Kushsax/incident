@@ -1,6 +1,7 @@
 """Orchestrator + control panel.
 
-- POST /alert            Alertmanager webhook -> Jira ticket + GitHub redeploy
+- poller                 watches Prometheus for firing alerts -> Jira ticket + GitHub redeploy
+- POST /alert            same handling, for alerts delivered by webhook (Alertmanager-compatible)
 - GET  /                 control-panel UI (static/index.html)
 - /api/*                 data and actions used by the UI
 """
@@ -101,6 +102,11 @@ def alert():
 
     data = request.get_json(silent=True) or {}
     firing = [a for a in data.get("alerts", []) if a.get("status") == "firing"]
+    return jsonify(_process_firing(firing))
+
+
+def _process_firing(firing):
+    """Self-heal and record the incident for newly firing alerts."""
     now = time.time()
     tickets = []
     inc = _current_incident() if firing else None
@@ -108,7 +114,7 @@ def alert():
     for a in firing:
         name = a.get("labels", {}).get("alertname")
         log.info("Alert firing: %s", name)
-        event("alert", f"Alertmanager delivered alert {name}")
+        event("alert", f"Alert firing: {name}")
     if inc is not None:
         inc["alert"] = inc["alert"] or now
         inc["detected"] = inc["detected"] or now
@@ -145,7 +151,7 @@ def alert():
             log.exception("Jira ticket creation failed for %s", name)
             event("error", f"Jira ticket creation failed: {e}")
 
-    return jsonify(firing=len(firing), tickets=tickets, redeploy_triggered=redeployed)
+    return {"firing": len(firing), "tickets": tickets, "redeploy_triggered": redeployed}
 
 
 def _dispatch(reason):
@@ -162,6 +168,46 @@ def _dispatch(reason):
         log.exception("GitHub dispatch failed")
         event("error", f"GitHub dispatch failed: {e}")
         return False
+
+
+# ---------------------------------------------------------------- alert poller
+
+POLL_SECONDS = float(os.environ.get("ALERT_POLL_SECONDS", "5"))
+_handled = set()   # keys of alerts already processed while they keep firing
+
+
+def _alert_key(a):
+    return "|".join(f"{k}={v}" for k, v in sorted(a.get("labels", {}).items()))
+
+
+def _poll_alerts_once():
+    """Process alerts that just started firing in Prometheus."""
+    r = requests.get(f"{PROM_URL}/api/v1/alerts", timeout=3)
+    firing = [a for a in r.json()["data"]["alerts"] if a.get("state") == "firing"]
+    keys = {_alert_key(a) for a in firing}
+    _handled.intersection_update(keys)   # re-arm alerts that stopped firing
+    new = []
+    for a in firing:
+        if _alert_key(a) not in _handled:
+            _handled.add(_alert_key(a))
+            new.append({"status": "firing", "labels": a.get("labels", {}),
+                        "annotations": a.get("annotations", {}),
+                        "startsAt": a.get("activeAt"), "fingerprint": _alert_key(a)})
+    if new:
+        _process_firing(new)
+
+
+def _poll_loop():
+    while True:
+        try:
+            _poll_alerts_once()
+        except Exception as e:
+            log.warning("Alert poll failed: %s", e)
+        time.sleep(POLL_SECONDS)
+
+
+def start_poller():
+    threading.Thread(target=_poll_loop, daemon=True, name="alert-poller").start()
 
 
 # ---------------------------------------------------------------- UI + API
@@ -368,3 +414,7 @@ def api_incident():
     _new_incident("simulated", fault=time.time())
     event("chaos", f"Incident simulated: chaos-app now failing {int(float(value) * 100)}% of requests")
     return jsonify(r.json())
+
+
+if os.environ.get("ALERT_POLLER", "1") == "1" and os.environ.get("PYTEST_CURRENT_TEST") is None:
+    start_poller()
