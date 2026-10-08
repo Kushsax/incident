@@ -1,7 +1,7 @@
 """Orchestrator + control panel.
 
 - poller                 watches Prometheus for firing alerts -> Jira ticket + GitHub redeploy
-- POST /alert            same handling, for alerts delivered by webhook (Alertmanager-compatible)
+- POST /alert            same handling, for alerts delivered by webhook
 - GET  /                 control-panel UI (static/index.html)
 - /api/*                 data and actions used by the UI
 """
